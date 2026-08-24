@@ -69,16 +69,30 @@ async function saveJSON(key, value) {
 
 async function loadProductsFromSupabase(fallback) {
   try {
-    const { data, error } = await supabaseClient.from("products").select("*").order("id", { ascending: false });
+    const { data, error } = await supabaseClient
+      .from("products")
+      .select("*")
+      .order("id", { ascending: false });
+
     if (error || !data || !data.length) return fallback;
+
     return data.map(p => ({
-      id: p.id, name: p.name, description: p.description || "",
-      price: p.price, image: p.image_url || "",
-      sizes: p.sizes || "", colors: p.colors || "", stock: p.stock || 0
+      id: p.id,
+      name: p.name,
+      category: p.category || "clothes",
+      description: p.description || "",
+      price: Number(p.price || 0),
+      image: p.image_url || "",
+      sizes: Array.isArray(p.sizes) ? p.sizes : [],
+      colors: Array.isArray(p.colors) ? p.colors : [],
+      stock: Number(p.stock || 0),
+      icon: p.icon || "🛍️"
     }));
-  } catch(e) { return fallback; }
+
+  } catch(e) {
+    return fallback;
+  }
 }
-const { useState, useEffect, useCallback, useMemo } = React;
 
 /* ============================================================
    بوتيك — متجر إلكتروني عبر واتساب
@@ -327,16 +341,17 @@ function App() {
     setProducts(next);
     setCachedJSON(K_PRODUCTS, next);
     const rows = next.map(p => ({
-      name: p.name,
-      description: p.description || "",
-      price: Number(p.price || 0),
-      compare_price: Number(p.compare_price || 0),
-      image_url: p.image || p.image_url || "",
-      sizes: p.sizes || null,
-      colors: p.colors || null,
-      stock: Number(p.stock || 0),
-      active: true
-    }));
+  name: p.name,
+  category: p.category || "clothes",
+  description: p.description || "",
+  price: Number(p.price || 0),
+  compare_price: Number(p.compare_price || 0),
+  image_url: p.image || p.image_url || "",
+  sizes: p.sizes || [],
+  colors: p.colors || [],
+  stock: Number(p.stock || 0),
+  active: true
+}));
     try {
       const { error: delError } = await supabaseClient.from("products").delete().neq("id", 0);
       if (delError) throw delError;
