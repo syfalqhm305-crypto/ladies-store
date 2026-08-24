@@ -1,0 +1,1270 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#A23E58" />
+  <title>متجر لمسة — النسخة الجديدة</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+
+// ====== Supabase configuration ======
+// ضع هنا Project URL و anon public key من Supabase.
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function getCachedJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function setCachedJSON(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+}
+
+async function loadJSON(key, fallback) {
+  try {
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3500));
+    const request = supabaseClient
+      .from("kv_store")
+      .select("value")
+      .eq("key", key)
+      .maybeSingle();
+    const { data, error } = await Promise.race([request, timeout]);
+    if (error || !data) return fallback;
+    const parsed = JSON.parse(data.value);
+    setCachedJSON(key, parsed);
+    return parsed;
+  } catch (e) {
+    return getCachedJSON(key, fallback);
+  }
+}
+
+async function saveJSON(key, value) {
+  setCachedJSON(key, value);
+  try {
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000));
+    const request = supabaseClient
+      .from("kv_store")
+      .upsert({ key, value: JSON.stringify(value), updated_at: new Date().toISOString() });
+    const { error } = await Promise.race([request, timeout]);
+    return !error;
+  } catch (e) {
+    return false;
+  }
+}
+
+const { useState, useEffect, useCallback, useMemo } = React;
+
+/* ============================================================
+   بوتيك — متجر إلكتروني عبر واتساب
+   ============================================================ */
+
+const FONT_STYLE = `
+@import url('https://fonts.googleapis.com/css2?family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@400;500;600;700;800&display=swap');
+:root{
+  --bg:#FBF5F2;
+  --surface:#FFFFFF;
+  --ink:#2B1720;
+  --muted:#8B6B72;
+  --accent:#A23E58;
+  --accent-ink:#7C2E43;
+  --gold:#B98A3E;
+  --border:#EEDDE1;
+  --success:#4C7A5E;
+  --info:#5B7A99;
+  --warning:#B98A3E;
+}
+*{box-sizing:border-box}
+.boutique-root{
+  font-family:'Cairo',sans-serif;
+  background:var(--bg);
+  color:var(--ink);
+  min-height:100vh;
+  direction:rtl;
+}
+.boutique-root .display{font-family:'Aref Ruqaa',serif;}
+.boutique-root button{font-family:'Cairo',sans-serif;cursor:pointer;}
+.boutique-root input,.boutique-root select,.boutique-root textarea{font-family:'Cairo',sans-serif;}
+.scrollbar-thin::-webkit-scrollbar{width:6px;height:6px}
+.scrollbar-thin::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px}
+@keyframes slideIn{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp .35s ease both}
+.stamp{
+  width:64px;height:64px;border-radius:999px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Aref Ruqaa',serif;font-size:11px;text-align:center;
+  border:2px solid currentColor;position:relative;flex-shrink:0;
+  transform:rotate(-6deg);
+}
+.stamp::before{
+  content:'';position:absolute;inset:4px;border:1px dashed currentColor;border-radius:999px;opacity:.5;
+}
+`;
+
+function useInjectFont() {
+  useEffect(() => {
+    const id = "boutique-font-style";
+    if (!document.getElementById(id)) {
+      const style = document.createElement("style");
+      style.id = id;
+      style.innerHTML = FONT_STYLE;
+      document.head.appendChild(style);
+    }
+  }, []);
+}
+
+/* ---------------- storage keys ---------------- */
+const K_PRODUCTS = "boutique:products";
+const K_ORDERS = "boutique:orders";
+const K_SETTINGS = "boutique:settings";
+
+const DEFAULT_SETTINGS = {
+  storeName: "متجر لمسة",
+  adminPassword: "",
+  adminMale: "966500000001",
+  adminFemale: "966500000002",
+  hawalaName: "اسم المستلم",
+  hawalaNumber: "رقم الحساب / الآيبان",
+  walletNumber: "0500000000",
+};
+
+const DEFAULT_PRODUCTS = [
+  { id: "p1", name: "فستان سهرة أنيق", category: "clothes", price: 320, icon: "👗", image: "", sizes: ["S", "M", "L", "XL"], colors: ["أسود", "عنابي", "كحلي"] },
+  { id: "p2", name: "عباءة مطرزة", category: "clothes", price: 280, icon: "🧕", image: "", sizes: ["S", "M", "L", "XL"], colors: ["أسود", "بني"] },
+  { id: "p3", name: "طقم كاجوال", category: "clothes", price: 150, icon: "👚", image: "", sizes: ["S", "M", "L"], colors: ["بيج", "رمادي", "أسود"] },
+  { id: "p4", name: "قفطان صيفي", category: "clothes", price: 210, icon: "🥻", image: "", sizes: ["S", "M", "L", "XL"], colors: ["أصفر", "فيروزي"] },
+  { id: "p5", name: "عطر ورد دمشقي", category: "perfumes", price: 120, icon: "🌹", image: "", sizes: ["30ml", "50ml", "100ml"], colors: [] },
+  { id: "p6", name: "عطر عود ملكي", category: "perfumes", price: 180, icon: "🕌", image: "", sizes: ["30ml", "50ml", "100ml"], colors: [] },
+  { id: "p7", name: "عطر مسك أبيض", category: "perfumes", price: 95, icon: "🤍", image: "", sizes: ["30ml", "50ml"], colors: [] },
+  { id: "p8", name: "بخور فاخر", category: "perfumes", price: 60, icon: "🪔", image: "", sizes: ["علبة صغيرة", "علبة كبيرة"], colors: [] },
+  { id: "p9", name: "حقيبة يد جلد", category: "accessories", price: 190, icon: "👜", image: "", sizes: [], colors: ["أسود", "بني", "بيج"] },
+  { id: "p10", name: "طقم إكسسوار لؤلؤي", category: "accessories", price: 85, icon: "📿", image: "", sizes: [], colors: ["فضي", "ذهبي"] },
+  { id: "p11", name: "وشاح حريري", category: "accessories", price: 70, icon: "🧣", image: "", sizes: [], colors: ["أحمر", "أزرق", "متعدد الألوان"] },
+  { id: "p12", name: "نظارة شمسية", category: "accessories", price: 110, icon: "🕶️", image: "", sizes: [], colors: ["أسود", "بني"] },
+];
+
+function ProductThumb({ product, size = 110, fontSize = 42, radius = 0 }) {
+  if (product.image) {
+    return (
+      <img
+        src={product.image}
+        alt={product.name}
+        style={{ width: "100%", height: size, objectFit: "cover", borderRadius: radius, display: "block" }}
+      />
+    );
+  }
+  return (
+    <div
+      style={{
+        height: size,
+        borderRadius: radius,
+        background: "linear-gradient(135deg, #F3DEE4, #FBF5F2)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize,
+      }}
+    >
+      {product.icon}
+    </div>
+  );
+}
+
+const CATEGORIES = [
+  { id: "clothes", label: "ملابس" },
+  { id: "perfumes", label: "عطور" },
+  { id: "accessories", label: "إكسسوارات" },
+];
+
+const STATUS_STAGES = ["قيد المراجعة", "تم الدفع", "جاري تجهيز الطلب", "تم التسليم"];
+const STATUS_COLOR = {
+  "قيد المراجعة": "var(--muted)",
+  "تم الدفع": "var(--info)",
+  "جاري تجهيز الطلب": "var(--warning)",
+  "تم التسليم": "var(--success)",
+};
+
+function genOrderId() {
+  const n = Math.floor(100000 + Math.random() * 900000);
+  return "ORD-" + n;
+}
+
+function digitsOnly(s) {
+  return (s || "").replace(/[^\d]/g, "");
+}
+
+function resizeImageFile(file, maxWidth = 500) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("تعذّرت قراءة الصورة"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("تعذّر تحميل الصورة"));
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function buildWhatsAppMessage(order, settings) {
+  const lines = [];
+  lines.push(`طلب جديد — ${settings.storeName}`);
+  lines.push(`رقم الطلب: ${order.id}`);
+  lines.push(`الاسم: ${order.customerName}`);
+  lines.push(`الجوال: ${order.customerPhone}`);
+  lines.push(`الجنس: ${order.gender === "male" ? "ذكر" : "أنثى"}`);
+  lines.push("");
+  lines.push("القطع:");
+  order.items.forEach((it) => {
+    const parts = [it.name];
+    if (it.size) parts.push(`المقاس: ${it.size}`);
+    if (it.color) parts.push(`اللون: ${it.color}`);
+    parts.push(`الكمية: ${it.qty}`);
+    parts.push(`${it.price * it.qty} ريال`);
+    lines.push("- " + parts.join(" | "));
+  });
+  lines.push("");
+  lines.push(`الإجمالي: ${order.total} ريال`);
+  lines.push("");
+  const pm =
+    order.paymentMethod === "handToHand"
+      ? "توصيل يد بيد (نفس الحي)"
+      : order.paymentMethod === "hawala"
+      ? "حوالة بنكية"
+      : "محفظة رقمية";
+  lines.push(`طريقة الدفع: ${pm}`);
+  return lines.join("\n");
+}
+
+/* ============================================================
+   المكوّن الرئيسي
+   ============================================================ */
+function App() {
+  useInjectFont();
+
+  const [loading, setLoading] = useState(false);
+  const [products, setProducts] = useState(() => getCachedJSON(K_PRODUCTS, DEFAULT_PRODUCTS));
+  const [orders, setOrders] = useState(() => getCachedJSON(K_ORDERS, []));
+  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...getCachedJSON(K_SETTINGS, {}) }));
+
+  const [view, setView] = useState("store"); // store | cart | checkout | tracking | admin
+  const [activeCategory, setActiveCategory] = useState("clothes");
+  const [cart, setCart] = useState([]);
+  const [activeProduct, setActiveProduct] = useState(null);
+  const [lastOrder, setLastOrder] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [p, o, s] = await Promise.all([
+        loadJSON(K_PRODUCTS, getCachedJSON(K_PRODUCTS, DEFAULT_PRODUCTS)),
+        loadJSON(K_ORDERS, getCachedJSON(K_ORDERS, [])),
+        loadJSON(K_SETTINGS, { ...DEFAULT_SETTINGS, ...getCachedJSON(K_SETTINGS, {}) }),
+      ]);
+      if (cancelled) return;
+      const nextProducts = p || DEFAULT_PRODUCTS;
+      const nextOrders = o || [];
+      const nextSettings = { ...DEFAULT_SETTINGS, ...(s || {}) };
+      // ترحيل النسخ القديمة: إذا كانت كلمة المرور الافتراضية القديمة 1234 موجودة، احذفها
+      // حتى تظهر شاشة إنشاء كلمة مرور جديدة بدل قبول 1234.
+      if (nextSettings.adminPassword === "1234") {
+        nextSettings.adminPassword = "";
+        setCachedJSON(K_SETTINGS, nextSettings);
+        saveJSON(K_SETTINGS, nextSettings);
+      }
+      setProducts(nextProducts);
+      setOrders(nextOrders);
+      setSettings(nextSettings);
+      setCachedJSON(K_PRODUCTS, nextProducts);
+      setCachedJSON(K_ORDERS, nextOrders);
+      setCachedJSON(K_SETTINGS, nextSettings);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const persistProducts = useCallback(async (next) => {
+    setProducts(next);
+    await saveJSON(K_PRODUCTS, next);
+  }, []);
+  const persistOrders = useCallback(async (next) => {
+    setOrders(next);
+    await saveJSON(K_ORDERS, next);
+  }, []);
+  const persistSettings = useCallback(async (next) => {
+    setSettings(next);
+    await saveJSON(K_SETTINGS, next);
+  }, []);
+
+  const addToCart = useCallback(
+    (item) => {
+      setCart((prev) => {
+        const key = item.productId + "|" + item.size + "|" + item.color;
+        const idx = prev.findIndex((c) => c.key === key);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], qty: next[idx].qty + item.qty };
+          return next;
+        }
+        return [...prev, { ...item, key }];
+      });
+      setActiveProduct(null);
+      showToast("أُضيفت القطعة إلى السلة");
+    },
+    [showToast]
+  );
+
+  const updateCartQty = (key, qty) => {
+    setCart((prev) => prev.map((c) => (c.key === key ? { ...c, qty: Math.max(1, qty) } : c)));
+  };
+  const removeFromCart = (key) => setCart((prev) => prev.filter((c) => c.key !== key));
+
+  const cartTotal = useMemo(() => cart.reduce((s, c) => s + c.price * c.qty, 0), [cart]);
+  const cartCount = useMemo(() => cart.reduce((s, c) => s + c.qty, 0), [cart]);
+
+  const submitOrder = useCallback(
+    async (payload) => {
+      const order = {
+        id: genOrderId(),
+        customerName: payload.name,
+        customerPhone: payload.phone,
+        gender: payload.gender,
+        paymentMethod: payload.paymentMethod,
+        items: cart.map(({ productId, name, price, size, color, qty }) => ({ productId, name, price, size, color, qty })),
+        total: cartTotal,
+        status: "قيد المراجعة",
+        createdAt: new Date().toISOString(),
+      };
+      const next = [order, ...orders];
+      await persistOrders(next);
+      setLastOrder(order);
+      setCart([]);
+      setView("confirmation");
+    },
+    [cart, cartTotal, orders, persistOrders]
+  );
+
+  return (
+    <div className="boutique-root">
+      <div style={{position:"fixed",left:8,bottom:8,zIndex:9999,fontSize:9,color:"var(--muted)",opacity:.7,pointerEvents:"none"}}>v2.0</div>
+      <TopBar
+        settings={settings}
+        cartCount={cartCount}
+        view={view}
+        setView={setView}
+      />
+
+      {view === "store" && (
+        <Store
+          products={products}
+          activeCategory={activeCategory}
+          setActiveCategory={setActiveCategory}
+          onSelect={setActiveProduct}
+        />
+      )}
+
+      {view === "cart" && (
+        <CartView
+          cart={cart}
+          total={cartTotal}
+          updateQty={updateCartQty}
+          removeItem={removeFromCart}
+          goCheckout={() => setView("checkout")}
+          goStore={() => setView("store")}
+        />
+      )}
+
+      {view === "checkout" && (
+        <Checkout
+          cart={cart}
+          total={cartTotal}
+          settings={settings}
+          onBack={() => setView("cart")}
+          onSubmit={submitOrder}
+        />
+      )}
+
+      {view === "confirmation" && lastOrder && (
+        <Confirmation order={lastOrder} settings={settings} onDone={() => setView("store")} onTrack={() => setView("tracking")} />
+      )}
+
+      {view === "tracking" && <Tracking orders={orders} />}
+
+      {view === "admin" && (
+        <Admin
+          orders={orders}
+          products={products}
+          settings={settings}
+          persistOrders={persistOrders}
+          persistProducts={persistProducts}
+          persistSettings={persistSettings}
+          showToast={showToast}
+        />
+      )}
+
+      {activeProduct && (
+        <ProductModal product={activeProduct} onClose={() => setActiveProduct(null)} onAdd={addToCart} />
+      )}
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "var(--ink)",
+            color: "#fff",
+            padding: "10px 20px",
+            borderRadius: 999,
+            fontSize: 14,
+            zIndex: 200,
+          }}
+          className="fade-up"
+        >
+          {toast}
+        </div>
+      )}
+
+      <footer style={{ textAlign: "center", padding: "24px 16px", color: "var(--muted)", fontSize: 12 }}>
+        <button
+          onClick={() => setView("admin")}
+          style={{ background: "none", border: "none", color: "var(--muted)", textDecoration: "underline", fontSize: 12 }}
+        >
+          لوحة تحكم المتجر
+        </button>
+      </footer>
+    </div>
+  );
+}
+
+/* ---------------- Top bar ---------------- */
+function TopBar({ settings, cartCount, view, setView }) {
+  return (
+    <div style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, zIndex: 50 }}>
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <button onClick={() => setView("store")} className="display" style={{ fontSize: 26, color: "var(--accent)", background: "none", border: "none" }}>
+          {settings.storeName}
+        </button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            onClick={() => setView("tracking")}
+            style={{
+              background: "none",
+              border: "1px solid var(--border)",
+              borderRadius: 999,
+              padding: "6px 12px",
+              fontSize: 13,
+              color: "var(--ink)",
+            }}
+          >
+            تتبع الطلب
+          </button>
+          <button
+            onClick={() => setView("cart")}
+            style={{
+              background: "var(--accent)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 999,
+              padding: "6px 14px",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              position: "relative",
+            }}
+          >
+            🛍️ السلة
+            {cartCount > 0 && (
+              <span
+                style={{
+                  background: "#fff",
+                  color: "var(--accent)",
+                  borderRadius: 999,
+                  fontSize: 11,
+                  width: 18,
+                  height: 18,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 800,
+                }}
+              >
+                {cartCount}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Store / product grid ---------------- */
+function Store({ products, activeCategory, setActiveCategory, onSelect }) {
+  const filtered = products.filter((p) => p.category === activeCategory);
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 60px" }}>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6, marginBottom: 18 }} className="scrollbar-thin">
+        {CATEGORIES.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => setActiveCategory(c.id)}
+            style={{
+              flexShrink: 0,
+              padding: "9px 20px",
+              borderRadius: 999,
+              border: activeCategory === c.id ? "1px solid var(--accent)" : "1px solid var(--border)",
+              background: activeCategory === c.id ? "var(--accent)" : "var(--surface)",
+              color: activeCategory === c.id ? "#fff" : "var(--ink)",
+              fontWeight: 700,
+              fontSize: 14,
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {filtered.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onSelect(p)}
+            className="fade-up"
+            style={{
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 16,
+              padding: 0,
+              overflow: "hidden",
+              textAlign: "right",
+            }}
+          >
+            <ProductThumb product={p} size={110} fontSize={42} />
+            <div style={{ padding: "10px 12px" }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
+              <div style={{ fontSize: 13, color: "var(--accent)", fontWeight: 800, marginTop: 4 }}>{p.price} ريال</div>
+            </div>
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "var(--muted)", padding: 30 }}>لا توجد منتجات في هذا القسم بعد</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Product modal ---------------- */
+function ProductModal({ product, onClose, onAdd }) {
+  const [size, setSize] = useState(product.sizes[0] || "");
+  const [color, setColor] = useState(product.colors[0] || "");
+  const [qty, setQty] = useState(1);
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(43,23,32,.45)", zIndex: 100, display: "flex", alignItems: "flex-end" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="fade-up"
+        style={{
+          background: "var(--surface)",
+          width: "100%",
+          maxWidth: 720,
+          margin: "0 auto",
+          borderRadius: "20px 20px 0 0",
+          padding: 20,
+          maxHeight: "85vh",
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>{product.name}</div>
+            <div style={{ color: "var(--accent)", fontWeight: 800, marginTop: 4 }}>{product.price} ريال</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, color: "var(--muted)" }}>✕</button>
+        </div>
+
+        <div style={{ margin: "16px 0" }}>
+          <ProductThumb product={product} size={130} fontSize={56} radius={14} />
+        </div>
+
+        {product.sizes.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 6 }}>المقاس / الحجم</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {product.sizes.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSize(s)}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: 10,
+                    border: size === s ? "1px solid var(--accent)" : "1px solid var(--border)",
+                    background: size === s ? "var(--accent)" : "#fff",
+                    color: size === s ? "#fff" : "var(--ink)",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {product.colors.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 6 }}>اللون</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {product.colors.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setColor(c)}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: 10,
+                    border: color === c ? "1px solid var(--accent)" : "1px solid var(--border)",
+                    background: color === c ? "var(--accent)" : "#fff",
+                    color: color === c ? "#fff" : "var(--ink)",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+          <div style={{ fontSize: 13, color: "var(--muted)" }}>الكمية</div>
+          <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--border)", borderRadius: 10 }}>
+            <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={{ background: "none", border: "none", padding: "6px 12px", fontSize: 16 }}>-</button>
+            <span style={{ padding: "0 10px", fontWeight: 700 }}>{qty}</span>
+            <button onClick={() => setQty((q) => q + 1)} style={{ background: "none", border: "none", padding: "6px 12px", fontSize: 16 }}>+</button>
+          </div>
+        </div>
+
+        <button
+          onClick={() =>
+            onAdd({ productId: product.id, name: product.name, price: product.price, size, color, qty })
+          }
+          style={{ width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontWeight: 800, fontSize: 15 }}
+        >
+          إضافة إلى السلة
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Cart view ---------------- */
+function CartView({ cart, total, updateQty, removeItem, goCheckout, goStore }) {
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 100px" }}>
+      <div className="display" style={{ fontSize: 24, marginBottom: 16, color: "var(--accent)" }}>سلة المشتريات</div>
+      {cart.length === 0 && (
+        <div style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>
+          السلة فارغة
+          <div style={{ marginTop: 16 }}>
+            <button onClick={goStore} style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 999, padding: "10px 22px" }}>
+              تصفح المتجر
+            </button>
+          </div>
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {cart.map((c) => (
+          <div key={c.key} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                {[c.size, c.color].filter(Boolean).join(" · ")}
+              </div>
+              <div style={{ fontSize: 13, color: "var(--accent)", fontWeight: 800, marginTop: 4 }}>{c.price * c.qty} ريال</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+              <button onClick={() => removeItem(c.key)} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12 }}>حذف</button>
+              <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8 }}>
+                <button onClick={() => updateQty(c.key, c.qty - 1)} style={{ background: "none", border: "none", padding: "3px 10px" }}>-</button>
+                <span style={{ padding: "0 8px", fontSize: 13, fontWeight: 700 }}>{c.qty}</span>
+                <button onClick={() => updateQty(c.key, c.qty + 1)} style={{ background: "none", border: "none", padding: "3px 10px" }}>+</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {cart.length > 0 && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "var(--surface)", borderTop: "1px solid var(--border)", padding: 16 }}>
+          <div style={{ maxWidth: 720, margin: "0 auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, fontWeight: 800 }}>
+              <span>الإجمالي</span>
+              <span style={{ color: "var(--accent)" }}>{total} ريال</span>
+            </div>
+            <button onClick={goCheckout} style={{ width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 12, padding: 14, fontWeight: 800, fontSize: 15 }}>
+              متابعة الطلب
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Checkout ---------------- */
+function Checkout({ cart, total, settings, onBack, onSubmit }) {
+  const [step, setStep] = useState(1);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [gender, setGender] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const canStep2 = name.trim().length > 1 && phone.trim().length >= 8 && gender;
+  const canConfirm = !!paymentMethod;
+
+  const paymentDetail = () => {
+    if (paymentMethod === "handToHand") {
+      const num = gender === "male" ? settings.adminMale : settings.adminFemale;
+      return { title: "توصيل يد بيد (نفس الحي)", body: `سيتم التواصل معك على واتساب لتحديد موعد التسليم عبر: ${num}` };
+    }
+    if (paymentMethod === "hawala") {
+      return { title: "حوالة بنكية", body: `الاسم: ${settings.hawalaName}\nرقم الحساب: ${settings.hawalaNumber}` };
+    }
+    if (paymentMethod === "wallet") {
+      return { title: "محفظة رقمية", body: `رقم المحفظة: ${settings.walletNumber}` };
+    }
+    return null;
+  };
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 60px" }}>
+      <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>← رجوع</button>
+      <div className="display" style={{ fontSize: 24, marginBottom: 16, color: "var(--accent)" }}>إتمام الطلب</div>
+
+      {/* Step indicator */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+        {[1, 2, 3].map((s) => (
+          <div key={s} style={{ flex: 1, height: 4, borderRadius: 4, background: s <= step ? "var(--accent)" : "var(--border)" }} />
+        ))}
+      </div>
+
+      {step === 1 && (
+        <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Field label="الاسم الكامل">
+            <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="اسمك" />
+          </Field>
+          <Field label="رقم الجوال">
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} placeholder="05xxxxxxxx" inputMode="tel" />
+          </Field>
+          <Field label="الجنس">
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setGender("female")} style={pillStyle(gender === "female")}>أنثى</button>
+              <button onClick={() => setGender("male")} style={pillStyle(gender === "male")}>ذكر</button>
+            </div>
+          </Field>
+          <button disabled={!canStep2} onClick={() => setStep(2)} style={{ ...primaryBtn, opacity: canStep2 ? 1 : 0.5 }}>
+            التالي: طريقة الدفع
+          </button>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {[
+            { id: "handToHand", label: "يد بيد (توصيل من نفس الحي)", icon: "🤝" },
+            { id: "hawala", label: "حوالة بنكية", icon: "🏦" },
+            { id: "wallet", label: "محفظة رقمية", icon: "📱" },
+          ].map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setPaymentMethod(m.id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: 14,
+                borderRadius: 12,
+                border: paymentMethod === m.id ? "1px solid var(--accent)" : "1px solid var(--border)",
+                background: paymentMethod === m.id ? "#FBEEF1" : "#fff",
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              <span style={{ fontSize: 20 }}>{m.icon}</span>
+              {m.label}
+            </button>
+          ))}
+          <button disabled={!canConfirm} onClick={() => setStep(3)} style={{ ...primaryBtn, opacity: canConfirm ? 1 : 0.5 }}>
+            التالي: المراجعة
+          </button>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="fade-up">
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16, marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>ملخص الطلب</div>
+            {cart.map((c) => (
+              <div key={c.key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span>{c.name} {c.size ? `(${c.size})` : ""} × {c.qty}</span>
+                <span>{c.price * c.qty} ريال</span>
+              </div>
+            ))}
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
+              <span>الإجمالي</span>
+              <span style={{ color: "var(--accent)" }}>{total} ريال</span>
+            </div>
+          </div>
+
+          <div style={{ background: "#FBEEF1", border: "1px solid var(--border)", borderRadius: 14, padding: 16, marginBottom: 18, whiteSpace: "pre-line", fontSize: 13 }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>{paymentDetail()?.title}</div>
+            {paymentDetail()?.body}
+          </div>
+
+          <button
+            disabled={submitting}
+            onClick={async () => {
+              setSubmitting(true);
+              await onSubmit({ name, phone, gender, paymentMethod });
+            }}
+            style={primaryBtn}
+          >
+            {submitting ? "...جارٍ التأكيد" : "تأكيد الطلب"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 6 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+const inputStyle = { width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14 };
+const primaryBtn = { width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 12, padding: 14, fontWeight: 800, fontSize: 15 };
+function pillStyle(active) {
+  return {
+    flex: 1,
+    padding: "10px 0",
+    borderRadius: 10,
+    border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+    background: active ? "var(--accent)" : "#fff",
+    color: active ? "#fff" : "var(--ink)",
+    fontWeight: 700,
+  };
+}
+
+/* ---------------- Confirmation ---------------- */
+function Confirmation({ order, settings, onDone, onTrack }) {
+  const adminNumber = order.gender === "male" ? settings.adminMale : settings.adminFemale;
+  const waLink = `https://wa.me/${digitsOnly(adminNumber)}?text=${encodeURIComponent(buildWhatsAppMessage(order, settings))}`;
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "40px 16px 60px", textAlign: "center" }} className="fade-up">
+      <div className="stamp" style={{ color: "var(--success)", margin: "0 auto 18px" }}>تم إنشاء الطلب</div>
+      <div className="display" style={{ fontSize: 24, color: "var(--accent)" }}>شكرًا لك، {order.customerName}</div>
+      <div style={{ color: "var(--muted)", marginTop: 6, fontSize: 14 }}>رقم طلبك</div>
+      <div style={{ fontWeight: 800, fontSize: 20, margin: "6px 0 20px" }}>{order.id}</div>
+
+      <div style={{ background: "#FBEEF1", border: "1px solid var(--border)", borderRadius: 14, padding: 16, marginBottom: 18, fontSize: 13, textAlign: "right" }}>
+        لإتمام الطلب، اضغطي على الزر أدناه لإرسال تفاصيل الطلب مباشرة على واتساب للمسؤول(ة) المختص(ة). سيتم فتح واتساب برسالة جاهزة — فقط اضغطي "إرسال".
+      </div>
+
+      <a
+        href={waLink}
+        target="_blank"
+        rel="noreferrer"
+        style={{
+          display: "block",
+          background: "#25D366",
+          color: "#fff",
+          borderRadius: 12,
+          padding: 14,
+          fontWeight: 800,
+          fontSize: 15,
+          textDecoration: "none",
+          marginBottom: 12,
+        }}
+      >
+        إرسال الطلب عبر واتساب
+      </a>
+
+      <button onClick={onTrack} style={{ ...pillStyle(false), width: "100%", marginBottom: 8 }}>تتبع حالة الطلب</button>
+      <button onClick={onDone} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, textDecoration: "underline" }}>
+        متابعة التسوق
+      </button>
+    </div>
+  );
+}
+
+/* ---------------- Tracking ---------------- */
+function Tracking({ orders }) {
+  const [phone, setPhone] = useState("");
+  const [searched, setSearched] = useState(false);
+  const results = orders.filter((o) => digitsOnly(o.customerPhone).includes(digitsOnly(phone)) && digitsOnly(phone).length >= 4);
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 60px" }}>
+      <div className="display" style={{ fontSize: 24, marginBottom: 16, color: "var(--accent)" }}>تتبع الطلب</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="أدخلي رقم جوالك"
+          style={{ ...inputStyle, flex: 1 }}
+          inputMode="tel"
+        />
+        <button onClick={() => setSearched(true)} style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 10, padding: "0 18px", fontWeight: 700 }}>
+          بحث
+        </button>
+      </div>
+
+      {searched && results.length === 0 && <div style={{ textAlign: "center", color: "var(--muted)", padding: 30 }}>لا توجد طلبات بهذا الرقم</div>}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {results.map((o) => (
+          <OrderTrackCard key={o.id} order={o} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OrderTrackCard({ order }) {
+  const stageIndex = STATUS_STAGES.indexOf(order.status);
+  return (
+    <div className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ fontWeight: 800 }}>{order.id}</div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>{new Date(order.createdAt).toLocaleDateString("ar-SA")}</div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 12 }}>
+        {STATUS_STAGES.map((s, i) => (
+          <React.Fragment key={s}>
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 999,
+                background: i <= stageIndex ? STATUS_COLOR[order.status] : "var(--border)",
+              }}
+            />
+            {i < STATUS_STAGES.length - 1 && (
+              <div style={{ flex: 1, height: 2, background: i < stageIndex ? STATUS_COLOR[order.status] : "var(--border)" }} />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+      <div style={{ fontWeight: 700, color: STATUS_COLOR[order.status], fontSize: 14 }}>{order.status}</div>
+      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>{order.items.length} قطعة · {order.total} ريال</div>
+    </div>
+  );
+}
+
+/* ---------------- Admin ---------------- */
+function Admin({ orders, products, settings, persistOrders, persistProducts, persistSettings, showToast }) {
+  const [authed, setAuthed] = useState(false);
+  const [pin, setPin] = useState("");
+  const [tab, setTab] = useState("orders");
+  const [newPassword, setNewPassword] = useState("");
+
+  if (!authed) {
+    const hasPassword = Boolean(settings.adminPassword);
+    return (
+      <div style={{ maxWidth: 420, margin: "60px auto", padding: 16, textAlign: "center" }}>
+        <div className="display" style={{ fontSize: 22, color: "var(--accent)", marginBottom: 6 }}>لوحة تحكم المتجر</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 16 }}>النسخة الجديدة — بدون كلمة مرور افتراضية</div>
+        {!hasPassword ? (
+          <>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>هذه أول مرة تفتح لوحة التحكم. أنشئ كلمة مرور جديدة.</div>
+            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="أنشئ كلمة مرور" style={{ ...inputStyle, textAlign: "center", marginBottom: 10 }} />
+            <button
+              onClick={async () => {
+                if (newPassword.length < 4) return showToast("كلمة المرور يجب أن تكون 4 أحرف أو أرقام على الأقل");
+                const next = { ...settings, adminPassword: newPassword };
+                await persistSettings(next);
+                setAuthed(true);
+                setNewPassword("");
+                showToast("تم إنشاء كلمة المرور");
+              }}
+              style={primaryBtn}
+            >
+              إنشاء كلمة المرور
+            </button>
+          </>
+        ) : (
+          <>
+            <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="كلمة المرور" style={{ ...inputStyle, textAlign: "center", marginBottom: 10 }} />
+            <button onClick={() => (pin === settings.adminPassword ? setAuthed(true) : showToast("كلمة المرور غير صحيحة"))} style={primaryBtn}>دخول</button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 16px 60px" }}>
+      <div className="display" style={{ fontSize: 24, marginBottom: 16, color: "var(--accent)" }}>لوحة التحكم</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {[
+          { id: "orders", label: "الطلبات" },
+          { id: "products", label: "المنتجات" },
+          { id: "settings", label: "الإعدادات" },
+        ].map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={pillStyle(tab === t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "orders" && <AdminOrders orders={orders} persistOrders={persistOrders} />}
+      {tab === "products" && <AdminProducts products={products} persistProducts={persistProducts} showToast={showToast} />}
+      {tab === "settings" && <AdminSettings settings={settings} persistSettings={persistSettings} showToast={showToast} />}
+    </div>
+  );
+}
+
+function AdminOrders({ orders, persistOrders }) {
+  const advance = (id) => {
+    const next = orders.map((o) => {
+      if (o.id !== id) return o;
+      const idx = STATUS_STAGES.indexOf(o.status);
+      const nextStatus = STATUS_STAGES[Math.min(idx + 1, STATUS_STAGES.length - 1)];
+      return { ...o, status: nextStatus };
+    });
+    persistOrders(next);
+  };
+
+  if (orders.length === 0) return <div style={{ textAlign: "center", color: "var(--muted)", padding: 30 }}>لا توجد طلبات بعد</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {orders.map((o) => (
+        <div key={o.id} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ fontWeight: 800 }}>{o.id}</div>
+            <div style={{ fontSize: 12, color: STATUS_COLOR[o.status], fontWeight: 700 }}>{o.status}</div>
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 2 }}>{o.customerName} — {o.customerPhone} ({o.gender === "male" ? "ذكر" : "أنثى"})</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
+            {o.items.map((it) => `${it.name}${it.size ? " " + it.size : ""}${it.color ? " " + it.color : ""} ×${it.qty}`).join("، ")}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 800, color: "var(--accent)" }}>{o.total} ريال</div>
+            {o.status !== "تم التسليم" && (
+              <button onClick={() => advance(o.id)} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12 }}>
+                نقل للحالة التالية
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminProducts({ products, persistProducts, showToast }) {
+  const [form, setForm] = useState({ name: "", category: "clothes", price: "", sizes: "", colors: "", icon: "🛍️", image: "" });
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { showToast("الرجاء اختيار ملف صورة"); return; }
+    setUploading(true);
+    try {
+      const dataUrl = await resizeImageFile(file, 500);
+      setForm((f) => ({ ...f, image: dataUrl }));
+    } catch (e) {
+      showToast("تعذّر رفع الصورة");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const add = () => {
+    if (!form.name || !form.price) { showToast("أدخلي الاسم والسعر"); return; }
+    const p = {
+      id: "p" + Date.now(),
+      name: form.name,
+      category: form.category,
+      price: Number(form.price),
+      icon: form.icon || "🛍️",
+      image: form.image || "",
+      sizes: form.sizes ? form.sizes.split(",").map((s) => s.trim()).filter(Boolean) : [],
+      colors: form.colors ? form.colors.split(",").map((s) => s.trim()).filter(Boolean) : [],
+    };
+    persistProducts([p, ...products]);
+    setForm({ name: "", category: "clothes", price: "", sizes: "", colors: "", icon: "🛍️", image: "" });
+    showToast("تمت إضافة المنتج");
+  };
+
+  const remove = (id) => persistProducts(products.filter((p) => p.id !== id));
+
+  return (
+    <div>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 14, marginBottom: 18 }}>
+        <div style={{ fontWeight: 800, marginBottom: 10 }}>إضافة منتج جديد</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <input placeholder="اسم المنتج" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
+          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} style={inputStyle}>
+            {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+          <input placeholder="السعر" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} style={inputStyle} inputMode="numeric" />
+          <input placeholder="المقاسات (مفصولة بفاصلة) مثال: S, M, L" value={form.sizes} onChange={(e) => setForm({ ...form, sizes: e.target.value })} style={inputStyle} />
+          <input placeholder="الألوان (مفصولة بفاصلة)" value={form.colors} onChange={(e) => setForm({ ...form, colors: e.target.value })} style={inputStyle} />
+          <input placeholder="رمز تعبيري (يظهر إذا ما رفعتِ صورة)" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} style={inputStyle} />
+
+          <div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 6 }}>صورة المنتج</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <label
+                style={{
+                  border: "1px dashed var(--border)",
+                  borderRadius: 10,
+                  padding: "10px 16px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--accent)",
+                  cursor: "pointer",
+                }}
+              >
+                {uploading ? "...جارٍ الرفع" : "اختيار صورة من الجهاز"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => handleFile(e.target.files && e.target.files[0])}
+                />
+              </label>
+              {form.image && (
+                <div style={{ position: "relative" }}>
+                  <img src={form.image} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: "cover" }} />
+                  <button
+                    onClick={() => setForm((f) => ({ ...f, image: "" }))}
+                    style={{ position: "absolute", top: -6, left: -6, background: "var(--ink)", color: "#fff", border: "none", borderRadius: 999, width: 18, height: 18, fontSize: 10, lineHeight: "18px", padding: 0 }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+            <input
+              placeholder="أو الصقي رابط صورة (اختياري)"
+              value={form.image && form.image.startsWith("data:") ? "" : form.image}
+              onChange={(e) => setForm({ ...form, image: e.target.value })}
+              style={{ ...inputStyle, marginTop: 8 }}
+            />
+          </div>
+
+          <button onClick={add} style={primaryBtn}>إضافة المنتج</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {products.map((p) => (
+          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {p.image ? (
+                <img src={p.image} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover" }} />
+              ) : (
+                <span style={{ fontSize: 20 }}>{p.icon}</span>
+              )}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{p.price} ريال</div>
+              </div>
+            </div>
+            <button onClick={() => remove(p.id)} style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 12 }}>حذف</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminSettings({ settings, persistSettings, showToast }) {
+  const [form, setForm] = useState({ ...settings });
+  const [passwordDraft, setPasswordDraft] = useState("");
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+      <Field label="اسم المتجر"><input value={form.storeName} onChange={(e) => setForm({ ...form, storeName: e.target.value })} style={inputStyle} /></Field>
+      <Field label="رقم واتساب المسؤول (ذكر)"><input value={form.adminMale} onChange={(e) => setForm({ ...form, adminMale: e.target.value })} style={inputStyle} placeholder="9665xxxxxxxx" /></Field>
+      <Field label="رقم واتساب المسؤولة (أنثى)"><input value={form.adminFemale} onChange={(e) => setForm({ ...form, adminFemale: e.target.value })} style={inputStyle} placeholder="9665xxxxxxxx" /></Field>
+      <Field label="اسم مستلم الحوالة"><input value={form.hawalaName} onChange={(e) => setForm({ ...form, hawalaName: e.target.value })} style={inputStyle} /></Field>
+      <Field label="رقم حساب الحوالة"><input value={form.hawalaNumber} onChange={(e) => setForm({ ...form, hawalaNumber: e.target.value })} style={inputStyle} /></Field>
+      <Field label="رقم المحفظة الرقمية"><input value={form.walletNumber} onChange={(e) => setForm({ ...form, walletNumber: e.target.value })} style={inputStyle} /></Field>
+
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginTop: 4 }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>كلمة مرور لوحة التحكم</div>
+        <input type="password" value={passwordDraft} onChange={(e) => setPasswordDraft(e.target.value)} placeholder="اكتب كلمة المرور الجديدة" style={inputStyle} />
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>اتركها فارغة إذا لم ترد تغيير كلمة المرور.</div>
+      </div>
+
+      <button
+        onClick={async () => {
+          if (passwordDraft && passwordDraft.length < 4) return showToast("كلمة المرور يجب أن تكون 4 أحرف أو أرقام على الأقل");
+          const next = { ...form, adminPassword: passwordDraft ? passwordDraft : (form.adminPassword || "") };
+          await persistSettings(next);
+          setForm(next);
+          setPasswordDraft("");
+          showToast("تم حفظ الإعدادات");
+        }}
+        style={primaryBtn}
+      >
+        حفظ الإعدادات
+      </button>
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode><App /></React.StrictMode>
+);
+
+  </script>
+</body>
+</html>
